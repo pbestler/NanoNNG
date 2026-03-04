@@ -375,10 +375,9 @@ conf_tls_parse(
 			conf_tls_load_inline_or_file(&tls->cert, tls->certfile);
 		} else if ((value = get_conf_value_with_prefix2(line, sz,
 		                prefix1, prefix2, "tls.cacertfile")) != NULL) {
-			FREE_NONULL(tls->ca);
 			FREE_NONULL(tls->cafile);
 			tls->cafile = value;
-			file_load_data(tls->cafile, (void **) &tls->ca);
+			conf_tls_load_inline_or_file(&tls->ca, tls->cafile);
 		} else if ((value = get_conf_value_with_prefix2(line, sz,
 		                prefix1, prefix2, "tls.verify_peer")) !=
 		    NULL) {

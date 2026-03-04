@@ -129,6 +129,11 @@ test_conf_parse_tls_pkcs11_old(void)
 	NUTS_TRUE(
 	    0 == strcmp(tls.certfile, "pkcs11:token=NanoMQ;object=broker-cert;type=cert"));
 	NUTS_TRUE(0 == strcmp(tls.cert, tls.certfile));
+	NUTS_TRUE(NULL != tls.cafile);
+	NUTS_TRUE(NULL != tls.ca);
+	NUTS_TRUE(
+	    0 == strcmp(tls.cafile, "pkcs11:token=NanoMQ;object=broker-ca;type=cert"));
+	NUTS_TRUE(0 == strcmp(tls.ca, tls.cafile));
 
 	conf_tls_destroy(&tls);
 }
@@ -151,6 +156,11 @@ test_conf_parse_ver2_tls_pkcs11(void)
 	NUTS_TRUE(
 	    0 == strcmp(conf->tls.certfile, "pkcs11:token=NanoMQ;object=broker-cert;type=cert"));
 	NUTS_TRUE(0 == strcmp(conf->tls.cert, conf->tls.certfile));
+	NUTS_TRUE(NULL != conf->tls.cafile);
+	NUTS_TRUE(NULL != conf->tls.ca);
+	NUTS_TRUE(
+	    0 == strcmp(conf->tls.cafile, "pkcs11:token=NanoMQ;object=broker-ca;type=cert"));
+	NUTS_TRUE(0 == strcmp(conf->tls.ca, conf->tls.cafile));
 
 	conf_fini(conf);
 }

@@ -124,6 +124,9 @@ struct nng_tls_engine_config {
 };
 
 static int open_conn_handshake(nng_tls_engine_conn *ec);
+static bool open_is_pkcs11_uri(const char *value);
+static int  open_load_x509_from_uri(const char *uri, X509 **xcertp);
+static int  open_load_pkey_from_uri(const char *uri, EVP_PKEY **pkeyp);
 
 /************************* SSL Connection ***********************/
 
@@ -602,6 +605,25 @@ open_config_ca_chain(
 	if (certs == NULL) {
 		log_info("open_config_ca_chain" "NULL certs detected!");
 	}
+
+	if (open_is_pkcs11_uri(certs)) {
+		X509 *      cert  = NULL;
+		X509_STORE *store = SSL_CTX_get_cert_store(cfg->ctx);
+		int         rv;
+
+		if ((rv = open_load_x509_from_uri(certs, &cert)) != 0) {
+			return rv;
+		}
+		if (X509_STORE_add_cert(store, cert) == 0) {
+			log_error("NNG-TLS-CFG-CACHAIN"
+			          "Failed to add PKCS#11 certificate to store");
+			X509_free(cert);
+			return (NNG_ECRYPTO);
+		}
+		X509_free(cert);
+		return (0);
+	}
+
 	len = strlen(certs);
 
 	BIO *bio = BIO_new_mem_buf(certs, len);
@@ -825,6 +847,13 @@ open_config_own_cert(nng_tls_engine_config *cfg, const char *cert,
 #else
 	(void) pass;
 #endif
+
+	if (cert_pkcs11 != key_pkcs11) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "PKCS#11 strict mode: cert and key must both be PKCS#11 URIs");
+		rv = NNG_EINVAL;
+		goto error;
+	}
 
 	if (cert_pkcs11) {
 		if ((rv = open_load_x509_from_uri(cert, &xcert)) != 0) {

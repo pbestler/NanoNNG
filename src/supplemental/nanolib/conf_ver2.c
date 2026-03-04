@@ -450,9 +450,11 @@ conf_tls_parse_ver2_base(conf_tls *tls, cJSON *jso_tls)
 			conf_tls_read_inline_or_file(
 			    &tls->cert, tls->certfile, "certfile");
 		}
-		if (NULL == tls->cafile ||
-		    0 == file_load_data(tls->cafile, (void **) &tls->ca)) {
+		if (NULL == tls->cafile) {
 			log_error("Read cacertfile %s failed!", tls->cafile);
+		} else {
+			conf_tls_read_inline_or_file(
+			    &tls->ca, tls->cafile, "cacertfile");
 		}
 	}
 

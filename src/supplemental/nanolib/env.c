@@ -229,7 +229,7 @@ read_env_conf(conf *config)
 	set_string_var(&config->tls.certfile, NANOMQ_TLS_CERT_PATH);
 	set_string_var(&config->tls.keyfile, NANOMQ_TLS_KEY_PATH);
 
-	set_data_from_path_var(
+	set_tls_data_from_path_or_uri_var(
 	    (void **) &config->tls.ca, NANOMQ_TLS_CA_CERT_PATH);
 	set_tls_data_from_path_or_uri_var(
 	    (void **) &config->tls.cert, NANOMQ_TLS_CERT_PATH);
