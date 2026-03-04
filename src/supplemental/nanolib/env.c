@@ -61,6 +61,24 @@ set_data_from_path_var(void **var, const char *env_str)
 }
 
 static void
+set_tls_data_from_path_or_uri_var(void **var, const char *env_str)
+{
+	char *env = NULL;
+
+	if ((env = getenv(env_str)) != NULL) {
+		if (*var) {
+			free(*var);
+			*var = NULL;
+		}
+		if (strncmp(env, "pkcs11:", 7) == 0) {
+			*var = nni_strdup(env);
+		} else {
+			file_load_data(env, var);
+		}
+	}
+}
+
+static void
 set_auth_type(auth_type_t *var, const char *env_str)
 {
 	char *env = NULL;
@@ -213,9 +231,9 @@ read_env_conf(conf *config)
 
 	set_data_from_path_var(
 	    (void **) &config->tls.ca, NANOMQ_TLS_CA_CERT_PATH);
-	set_data_from_path_var(
+	set_tls_data_from_path_or_uri_var(
 	    (void **) &config->tls.cert, NANOMQ_TLS_CERT_PATH);
-	set_data_from_path_var(
+	set_tls_data_from_path_or_uri_var(
 	    (void **) &config->tls.key, NANOMQ_TLS_KEY_PATH);
 
 	set_string_var(&config->tls.key_password, NANOMQ_TLS_KEY_PASSWORD);

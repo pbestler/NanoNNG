@@ -90,6 +90,9 @@ print_hex(char *str, const uint8_t *data, size_t len)
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#if OPENSSL_VERSION_MAJOR >= 3
+#include <openssl/store.h>
+#endif
 
 #include "core/nng_impl.h"
 #include "nng/nng.h"
@@ -668,12 +671,138 @@ open_get_password(char *passwd, int size, int rw, void *ctx)
 }
 #endif
 
+static bool
+open_is_pkcs11_uri(const char *value)
+{
+	return (value != NULL) && (strncmp(value, "pkcs11:", 7) == 0);
+}
+
+static int
+open_load_x509_from_uri(const char *uri, X509 **xcertp)
+{
+#if OPENSSL_VERSION_MAJOR >= 3
+	OSSL_STORE_CTX * store = NULL;
+	OSSL_STORE_INFO *info  = NULL;
+	X509 *           xcert = NULL;
+	int              rv    = NNG_ECRYPTO;
+
+	store = OSSL_STORE_open(uri, NULL, NULL, NULL, NULL);
+	if (store == NULL) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "Failed to open PKCS#11 certificate URI: %s",
+		    uri);
+		return (NNG_ECRYPTO);
+	}
+
+	while ((info = OSSL_STORE_load(store)) != NULL) {
+		if (OSSL_STORE_INFO_get_type(info) == OSSL_STORE_INFO_CERT) {
+			xcert = OSSL_STORE_INFO_get1_CERT(info);
+			OSSL_STORE_INFO_free(info);
+			info = NULL;
+			break;
+		}
+		OSSL_STORE_INFO_free(info);
+		info = NULL;
+	}
+
+	if (xcert == NULL) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "No certificate found in PKCS#11 URI: %s",
+		    uri);
+		goto out;
+	}
+
+	*xcertp = xcert;
+	xcert   = NULL;
+	rv      = 0;
+
+out:
+	if (info) {
+		OSSL_STORE_INFO_free(info);
+	}
+	if (store) {
+		OSSL_STORE_close(store);
+	}
+	if (xcert) {
+		X509_free(xcert);
+	}
+	return (rv);
+#else
+	NNI_ARG_UNUSED(uri);
+	NNI_ARG_UNUSED(xcertp);
+	log_error("NNG-TLS-CFG-OWNCHAIN"
+	          "PKCS#11 URI support requires OpenSSL >= 3");
+	return (NNG_ENOTSUP);
+#endif
+}
+
+static int
+open_load_pkey_from_uri(const char *uri, EVP_PKEY **pkeyp)
+{
+#if OPENSSL_VERSION_MAJOR >= 3
+	OSSL_STORE_CTX * store = NULL;
+	OSSL_STORE_INFO *info  = NULL;
+	EVP_PKEY *       pkey  = NULL;
+	int              rv    = NNG_ECRYPTO;
+
+	store = OSSL_STORE_open(uri, NULL, NULL, NULL, NULL);
+	if (store == NULL) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "Failed to open PKCS#11 private key URI: %s",
+		    uri);
+		return (NNG_ECRYPTO);
+	}
+
+	while ((info = OSSL_STORE_load(store)) != NULL) {
+		if (OSSL_STORE_INFO_get_type(info) == OSSL_STORE_INFO_PKEY) {
+			pkey = OSSL_STORE_INFO_get1_PKEY(info);
+			OSSL_STORE_INFO_free(info);
+			info = NULL;
+			break;
+		}
+		OSSL_STORE_INFO_free(info);
+		info = NULL;
+	}
+
+	if (pkey == NULL) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "No private key found in PKCS#11 URI: %s",
+		    uri);
+		goto out;
+	}
+
+	*pkeyp = pkey;
+	pkey   = NULL;
+	rv     = 0;
+
+out:
+	if (info) {
+		OSSL_STORE_INFO_free(info);
+	}
+	if (store) {
+		OSSL_STORE_close(store);
+	}
+	if (pkey) {
+		EVP_PKEY_free(pkey);
+	}
+	return (rv);
+#else
+	NNI_ARG_UNUSED(uri);
+	NNI_ARG_UNUSED(pkeyp);
+	log_error("NNG-TLS-CFG-OWNCHAIN"
+	          "PKCS#11 URI support requires OpenSSL >= 3");
+	return (NNG_ENOTSUP);
+#endif
+}
+
 static int
 open_config_own_cert(nng_tls_engine_config *cfg, const char *cert,
     const char *key, const char *pass)
 {
 	int len;
 	int rv = 0;
+	bool cert_pkcs11 = open_is_pkcs11_uri(cert);
+	bool key_pkcs11  = open_is_pkcs11_uri(key);
 	BIO *biokey = NULL;
 	BIO *biocert = NULL;
 	X509 *xcert = NULL;
@@ -697,18 +826,25 @@ open_config_own_cert(nng_tls_engine_config *cfg, const char *cert,
 	(void) pass;
 #endif
 
-	len = strlen(cert);
-	biocert = BIO_new_mem_buf(cert, len);
-	if (!biocert) {
-		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to create BIO");
-		rv = NNG_ENOMEM;
-		goto error;
-	}
-	xcert = PEM_read_bio_X509(biocert, NULL, 0, NULL);
-	if (!xcert) {
-		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to load certificate from buffer");
-		rv = NNG_EINVAL;
-		goto error;
+	if (cert_pkcs11) {
+		if ((rv = open_load_x509_from_uri(cert, &xcert)) != 0) {
+			goto error;
+		}
+	} else {
+		len = strlen(cert);
+		biocert = BIO_new_mem_buf(cert, len);
+		if (!biocert) {
+			log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to create BIO");
+			rv = NNG_ENOMEM;
+			goto error;
+		}
+		xcert = PEM_read_bio_X509(biocert, NULL, 0, NULL);
+		if (!xcert) {
+			log_error("NNG-TLS-CFG-OWNCHAIN"
+			          "Failed to load certificate from buffer");
+			rv = NNG_EINVAL;
+			goto error;
+		}
 	}
 	if (SSL_CTX_use_certificate(cfg->ctx, xcert) <= 0) {
 		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to set certificate to SSL_CTX");
@@ -716,18 +852,25 @@ open_config_own_cert(nng_tls_engine_config *cfg, const char *cert,
 		goto error;
 	}
 
-	len = strlen(key);
-	biokey = BIO_new_mem_buf(key, len);
-	if (!biokey) {
-		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to create key BIO");
-		rv = NNG_ENOMEM;
-		goto error;
-	}
-	pkey = PEM_read_bio_PrivateKey(biokey, NULL, NULL, NULL);
-	if (!pkey) {
-		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to load key from buffer");
-		rv = NNG_EINVAL;
-		goto error;
+	if (key_pkcs11) {
+		if ((rv = open_load_pkey_from_uri(key, &pkey)) != 0) {
+			goto error;
+		}
+	} else {
+		len = strlen(key);
+		biokey = BIO_new_mem_buf(key, len);
+		if (!biokey) {
+			log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to create key BIO");
+			rv = NNG_ENOMEM;
+			goto error;
+		}
+		pkey = PEM_read_bio_PrivateKey(biokey, NULL, NULL, NULL);
+		if (!pkey) {
+			log_error("NNG-TLS-CFG-OWNCHAIN"
+			          "Failed to load key from buffer");
+			rv = NNG_EINVAL;
+			goto error;
+		}
 	}
 	if (SSL_CTX_use_PrivateKey(cfg->ctx, pkey) <= 0) {
 		log_error("NNG-TLS-CFG-OWNCHAIN" "Failed to set key to SSL_CTX");

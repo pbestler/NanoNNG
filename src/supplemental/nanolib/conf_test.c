@@ -1,4 +1,5 @@
 #include "nng/supplemental/nanolib/conf.h"
+#include "nng/supplemental/nanolib/nanolib.h"
 
 #include "nuts.h"
 
@@ -8,11 +9,20 @@
 	"nmq_old_test.conf"
 #define CONF_PATH \
 	"../../../../../nng/src/supplemental/nanolib/test_conf/nmq_test.conf"
+#define PKCS11_OLD_CONF_PATH                                             \
+	"../../../../../nng/src/supplemental/nanolib/test_conf/"          \
+	"nmq_tls_pkcs11_old_test.conf"
+#define PKCS11_CONF_PATH \
+	"../../../../../nng/src/supplemental/nanolib/test_conf/nmq_tls_pkcs11_test.conf"
 #else
 #define OLD_CONF_PATH \
 	"../../../../src/supplemental/nanolib/test_conf/nmq_old_test.conf"
 #define CONF_PATH \
 	"../../../../src/supplemental/nanolib/test_conf/nmq_test.conf"
+#define PKCS11_OLD_CONF_PATH \
+	"../../../../src/supplemental/nanolib/test_conf/nmq_tls_pkcs11_old_test.conf"
+#define PKCS11_CONF_PATH \
+	"../../../../src/supplemental/nanolib/test_conf/nmq_tls_pkcs11_test.conf"
 #endif
 
 
@@ -101,10 +111,56 @@ test_conf_parse_ver2(void)
 	conf_fini(conf);
 }
 
+void
+test_conf_parse_tls_pkcs11_old(void)
+{
+	conf_tls tls;
+	conf_tls_init(&tls);
+	conf_tls_parse(&tls, PKCS11_OLD_CONF_PATH, "\0", "\0");
+
+	NUTS_TRUE(NULL != tls.keyfile);
+	NUTS_TRUE(NULL != tls.key);
+	NUTS_TRUE(
+	    0 == strcmp(tls.keyfile, "pkcs11:token=NanoMQ;object=broker-key;type=private"));
+	NUTS_TRUE(0 == strcmp(tls.key, tls.keyfile));
+
+	NUTS_TRUE(NULL != tls.certfile);
+	NUTS_TRUE(NULL != tls.cert);
+	NUTS_TRUE(
+	    0 == strcmp(tls.certfile, "pkcs11:token=NanoMQ;object=broker-cert;type=cert"));
+	NUTS_TRUE(0 == strcmp(tls.cert, tls.certfile));
+
+	conf_tls_destroy(&tls);
+}
+
+void
+test_conf_parse_ver2_tls_pkcs11(void)
+{
+	conf *conf = get_test_conf(PKCS11_CONF_PATH);
+	NUTS_TRUE(conf != NULL);
+	conf_parse_ver2(conf);
+
+	NUTS_TRUE(NULL != conf->tls.keyfile);
+	NUTS_TRUE(NULL != conf->tls.key);
+	NUTS_TRUE(
+	    0 == strcmp(conf->tls.keyfile, "pkcs11:token=NanoMQ;object=broker-key;type=private"));
+	NUTS_TRUE(0 == strcmp(conf->tls.key, conf->tls.keyfile));
+
+	NUTS_TRUE(NULL != conf->tls.certfile);
+	NUTS_TRUE(NULL != conf->tls.cert);
+	NUTS_TRUE(
+	    0 == strcmp(conf->tls.certfile, "pkcs11:token=NanoMQ;object=broker-cert;type=cert"));
+	NUTS_TRUE(0 == strcmp(conf->tls.cert, conf->tls.certfile));
+
+	conf_fini(conf);
+}
+
 NUTS_TESTS = {
    {"get size", test_get_size},
    {"get time", test_get_time},
    {"conf parse v2", test_conf_parse_ver2},
+   {"conf parse v2 pkcs11", test_conf_parse_ver2_tls_pkcs11},
    {"conf parse", test_conf_parse},
+   {"conf parse pkcs11", test_conf_parse_tls_pkcs11_old},
    {NULL, NULL} 
 };

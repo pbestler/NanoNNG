@@ -416,6 +416,19 @@ conf_basic_parse_ver2(conf *config, cJSON *jso)
 }
 
 static void
+conf_tls_read_inline_or_file(char **dst, const char *value, const char *name)
+{
+	FREE_NONULL(*dst);
+	if (value != NULL && strncmp(value, "pkcs11:", 7) == 0) {
+		*dst = nng_strdup(value);
+		return;
+	}
+	if (0 == file_load_data(value, (void **) dst)) {
+		log_warn("Read %s %s failed!", name, value);
+	}
+}
+
+static void
 conf_tls_parse_ver2_base(conf_tls *tls, cJSON *jso_tls)
 {
 	if (jso_tls) {
@@ -425,13 +438,17 @@ conf_tls_parse_ver2_base(conf_tls *tls, cJSON *jso_tls)
 		hocon_read_str_base(tls, cafile, "cacertfile", jso_tls);
 		hocon_read_str(tls, key_password, jso_tls);
 
-		if (NULL == tls->keyfile ||
-		    0 == file_load_data(tls->keyfile, (void **) &tls->key)) {
+		if (NULL == tls->keyfile) {
 			log_warn("Read keyfile %s failed!", tls->keyfile);
+		} else {
+			conf_tls_read_inline_or_file(
+			    &tls->key, tls->keyfile, "keyfile");
 		}
-		if (NULL == tls->certfile ||
-		    0 == file_load_data(tls->certfile, (void **) &tls->cert)) {
+		if (NULL == tls->certfile) {
 			log_warn("Read certfile %s failed!", tls->certfile);
+		} else {
+			conf_tls_read_inline_or_file(
+			    &tls->cert, tls->certfile, "certfile");
 		}
 		if (NULL == tls->cafile ||
 		    0 == file_load_data(tls->cafile, (void **) &tls->ca)) {
