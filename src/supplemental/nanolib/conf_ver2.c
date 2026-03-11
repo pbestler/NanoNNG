@@ -992,6 +992,63 @@ check_and_replace_vin(char *origin, const char *replace)
 	return new;
 }
 
+// Resolve ${ENV_VAR_NAME} placeholders in a config string value.
+// Each ${NAME} token is replaced by the value of getenv("NAME").
+// ${VIN} is intentionally skipped – it is handled by the VIN mechanism.
+// Returns the (possibly reallocated) string; the caller owns the result.
+static char *
+resolve_env_vars(char *str)
+{
+	if (str == NULL) {
+		return NULL;
+	}
+	char *result = str;
+	char *pos    = result;
+
+	while ((pos = strstr(pos, "${")) != NULL) {
+		if (strncmp(pos, "${VIN}", 6) == 0) {
+			pos += 6;
+			continue;
+		}
+
+		char *end = strchr(pos, '}');
+		if (end == NULL) {
+			break;
+		}
+
+		size_t var_len  = (size_t)(end - pos - 2);
+		char  *var_name = nng_alloc(var_len + 1);
+		strncpy(var_name, pos + 2, var_len);
+		var_name[var_len] = '\0';
+
+		char *env_val = getenv(var_name);
+		nng_strfree(var_name);
+
+		if (env_val != NULL) {
+			size_t before_len = (size_t)(pos - result);
+			size_t after_len  = strlen(end + 1);
+			size_t env_len    = strlen(env_val);
+			size_t new_len    = before_len + env_len + after_len + 1;
+
+			char *new_str = nng_alloc(new_len);
+			strncpy(new_str, result, before_len);
+			strcpy(new_str + before_len, env_val);
+			strcpy(new_str + before_len + env_len, end + 1);
+
+			nng_strfree(result);
+			result = new_str;
+			pos    = result + before_len + env_len;
+		} else {
+			log_warn("Bridge config: env var '%s' not set, "
+			         "keeping placeholder as-is",
+			    pos + 2);
+			pos = end + 1;
+		}
+	}
+
+	return result;
+}
+
 static void
 update_clientid_vin(conf_bridge_node *node, const char *vin)
 {
