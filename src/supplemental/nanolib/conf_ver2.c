@@ -1150,6 +1150,12 @@ conf_bridge_connector_parse_ver2(conf_bridge_node *node, cJSON *jso_connector)
 	hocon_read_bool(node, enable, jso_connector);
 	hocon_read_str(node, username, jso_connector);
 	hocon_read_str(node, password, jso_connector);
+
+	// Resolve ${ENV_VAR_NAME} placeholders – e.g. username = "${MQTT_USER}"
+	node->clientid = resolve_env_vars(node->clientid);
+	node->username = resolve_env_vars(node->username);
+	node->password = resolve_env_vars(node->password);
+
 	update_bridge_node_vin(node, CONF_NODE_CLIENTID);
 
 	cJSON    *jso_tls         = hocon_get_obj("ssl", jso_connector);
