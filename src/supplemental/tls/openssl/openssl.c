@@ -91,6 +91,7 @@ print_hex(char *str, const uint8_t *data, size_t len)
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #if OPENSSL_VERSION_MAJOR >= 3
+#include <openssl/provider.h>
 #include <openssl/store.h>
 #endif
 
@@ -125,8 +126,16 @@ struct nng_tls_engine_config {
 
 static int open_conn_handshake(nng_tls_engine_conn *ec);
 static bool open_is_pkcs11_uri(const char *value);
+static int  open_check_pkcs11_provider(void);
 static int  open_load_x509_from_uri(const char *uri, X509 **xcertp);
 static int  open_load_pkey_from_uri(const char *uri, EVP_PKEY **pkeyp);
+
+#if OPENSSL_VERSION_MAJOR >= 3
+static nni_mtx       open_pkcs11_lock     = NNI_MTX_INITIALIZER;
+static OSSL_PROVIDER *open_pkcs11_provider = NULL;
+static bool          open_pkcs11_checked  = false;
+static int           open_pkcs11_status   = NNG_ENOTSUP;
+#endif
 
 /************************* SSL Connection ***********************/
 
@@ -700,6 +709,55 @@ open_is_pkcs11_uri(const char *value)
 }
 
 static int
+open_check_pkcs11_provider(void)
+{
+#if OPENSSL_VERSION_MAJOR >= 3
+	int rv;
+
+	nni_mtx_lock(&open_pkcs11_lock);
+
+	if (open_pkcs11_checked) {
+		rv = open_pkcs11_status;
+		goto out;
+	}
+
+	open_pkcs11_status = NNG_ECRYPTO;
+	if (!OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL)) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "Failed to initialize OpenSSL configuration for PKCS#11 support");
+		goto done;
+	}
+
+	open_pkcs11_provider = OSSL_PROVIDER_load(NULL, "pkcs11");
+	if (open_pkcs11_provider == NULL) {
+		log_error("NNG-TLS-CFG-OWNCHAIN"
+		          "Failed to load OpenSSL pkcs11 provider; configure openssl.cnf/OPENSSL_MODULES so the provider is available");
+		goto done;
+	}
+
+	open_pkcs11_status = 0;
+
+done:
+	open_pkcs11_checked = true;
+	rv                  = open_pkcs11_status;
+
+out:
+	nni_mtx_unlock(&open_pkcs11_lock);
+	return (rv);
+#else
+	log_error("NNG-TLS-CFG-OWNCHAIN"
+	          "PKCS#11 URI support requires OpenSSL >= 3");
+	return (NNG_ENOTSUP);
+#endif
+}
+
+int
+nng_tls_engine_check_pkcs11_open(void)
+{
+	return (open_check_pkcs11_provider());
+}
+
+static int
 open_load_x509_from_uri(const char *uri, X509 **xcertp)
 {
 #if OPENSSL_VERSION_MAJOR >= 3
@@ -707,6 +765,10 @@ open_load_x509_from_uri(const char *uri, X509 **xcertp)
 	OSSL_STORE_INFO *info  = NULL;
 	X509 *           xcert = NULL;
 	int              rv    = NNG_ECRYPTO;
+
+	if ((rv = open_check_pkcs11_provider()) != 0) {
+		return (rv);
+	}
 
 	store = OSSL_STORE_open(uri, NULL, NULL, NULL, NULL);
 	if (store == NULL) {
@@ -766,6 +828,10 @@ open_load_pkey_from_uri(const char *uri, EVP_PKEY **pkeyp)
 	OSSL_STORE_INFO *info  = NULL;
 	EVP_PKEY *       pkey  = NULL;
 	int              rv    = NNG_ECRYPTO;
+
+	if ((rv = open_check_pkcs11_provider()) != 0) {
+		return (rv);
+	}
 
 	store = OSSL_STORE_open(uri, NULL, NULL, NULL, NULL);
 	if (store == NULL) {
@@ -1000,6 +1066,16 @@ void
 nng_tls_engine_fini_open(void)
 {
 	trace("start");
+#if OPENSSL_VERSION_MAJOR >= 3
+	nni_mtx_lock(&open_pkcs11_lock);
+	if (open_pkcs11_provider != NULL) {
+		OSSL_PROVIDER_unload(open_pkcs11_provider);
+		open_pkcs11_provider = NULL;
+	}
+	open_pkcs11_checked = false;
+	open_pkcs11_status  = NNG_ENOTSUP;
+	nni_mtx_unlock(&open_pkcs11_lock);
+#endif
 	EVP_cleanup();
 	trace("end");
 }

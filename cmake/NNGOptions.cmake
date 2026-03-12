@@ -135,6 +135,20 @@ else ()
     set(NNG_TLS_ENGINE none)
 endif ()
 
+option(NNG_REQUIRE_PKCS11_PROVIDER
+    "Require OpenSSL TLS engine with OpenSSL 3 when using PKCS#11 support."
+    OFF)
+if (NNG_REQUIRE_PKCS11_PROVIDER)
+    if (NOT NNG_ENABLE_TLS)
+        message(FATAL_ERROR
+            "NNG_REQUIRE_PKCS11_PROVIDER requires NNG_ENABLE_TLS=ON.")
+    endif ()
+    if (NOT NNG_TLS_ENGINE STREQUAL "open")
+        message(FATAL_ERROR
+            "NNG_REQUIRE_PKCS11_PROVIDER requires NNG_TLS_ENGINE=open.")
+    endif ()
+endif ()
+
 # HTTP API support.
 option (NNG_ENABLE_HTTP "Enable HTTP API." ON)
 if (NNG_ENABLE_HTTP)

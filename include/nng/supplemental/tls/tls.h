@@ -145,6 +145,11 @@ NNG_DECL const char *nng_tls_engine_description(void);
 // nng_tls_engine_fips_mode returns true if the engine is in FIPS 140-2 mode.
 NNG_DECL bool nng_tls_engine_fips_mode(void);
 
+// nng_tls_engine_check_pkcs11 verifies that the active TLS engine can
+// resolve PKCS#11 URIs. Engines that do not support PKCS#11 should return
+// NNG_ENOTSUP.
+NNG_DECL int nng_tls_engine_check_pkcs11(void);
+
 #ifdef __cplusplus
 }
 #endif

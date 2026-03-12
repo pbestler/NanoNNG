@@ -1544,6 +1544,23 @@ nng_tls_engine_fips_mode(void)
 	return (eng == NULL ? false : eng->fips_mode);
 }
 
+#ifdef NNG_TLS_ENGINE_CHECK_PKCS11
+extern int NNG_TLS_ENGINE_CHECK_PKCS11(void);
+#else
+static int
+NNG_TLS_ENGINE_CHECK_PKCS11(void)
+{
+	return (NNG_ENOTSUP);
+}
+#endif
+
+int
+nng_tls_engine_check_pkcs11(void)
+{
+	nni_init();
+	return (NNG_TLS_ENGINE_CHECK_PKCS11());
+}
+
 int
 nng_tls_engine_register(const nng_tls_engine *engine)
 {
@@ -1759,6 +1776,12 @@ bool
 nng_tls_engine_fips_mode(void)
 {
 	return (false);
+}
+
+int
+nng_tls_engine_check_pkcs11(void)
+{
+	return (NNG_ENOTSUP);
 }
 
 int
