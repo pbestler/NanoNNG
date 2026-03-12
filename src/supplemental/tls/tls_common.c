@@ -1557,7 +1557,11 @@ NNG_TLS_ENGINE_CHECK_PKCS11(void)
 int
 nng_tls_engine_check_pkcs11(void)
 {
-	nni_init();
+	int rv;
+
+	if ((rv = nni_init()) != 0) {
+		return (rv);
+	}
 	return (NNG_TLS_ENGINE_CHECK_PKCS11());
 }
 
