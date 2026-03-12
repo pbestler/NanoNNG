@@ -1,0 +1,57 @@
+= nng_tls_engine_check_pkcs11(3tls)
+//
+// Copyright 2026 Peter Bestler <peter.bestler@liebherr.com>
+//
+// This document is supplied under the terms of the MIT License, a
+// copy of which should be located in the distribution where this
+// file was obtained (LICENSE.txt).  A copy of the license may also be
+// found online at https://opensource.org/licenses/MIT.
+//
+
+== NAME
+
+nng_tls_engine_check_pkcs11 - verify PKCS#11 URI support in the active TLS engine
+
+== SYNOPSIS
+
+[source,c]
+----
+#include <nng/supplemental/tls/tls.h>
+
+int nng_tls_engine_check_pkcs11(void);
+----
+
+== DESCRIPTION
+
+The `nng_tls_engine_check_pkcs11()` function verifies that the active
+xref:nng_tls_engine.5.adoc[TLS engine] can resolve PKCS#11 URIs for
+certificate, key, and trust-store loading.
+
+The check may perform lazy engine-specific initialization.
+For example, an OpenSSL-based engine may load provider configuration on
+first use.
+
+If the active engine does not support PKCS#11 URI resolution, then
+`NNG_ENOTSUP` is returned.
+
+== RETURN VALUES
+
+This function returns 0 if PKCS#11 URI support is available, or an error
+value otherwise.
+
+== ERRORS
+
+[horizontal]
+`NNG_ENOTSUP`:: PKCS#11 URI support is not available in the active TLS engine.
+`NNG_ECRYPTO`:: The TLS engine supports PKCS#11, but required cryptographic
+resources such as a provider could not be loaded.
+
+NOTE: Other library initialization errors may also be returned.
+
+== SEE ALSO
+
+[.text-left]
+xref:nng_tls_engine_description.3tls.adoc[nng_tls_engine_description(3tls)],
+xref:nng_tls_engine_name.3tls.adoc[nng_tls_engine_name(3tls)],
+xref:nng_tls_engine.5.adoc[nng_tls_engine(5)],
+xref:nng.7.adoc[nng(7)]

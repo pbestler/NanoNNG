@@ -31,7 +31,9 @@ the work with NNG.
 Information about the existing TLS engine can be obtained from the functions
 xref:nng_tls_engine_name.3tls.adoc[`nng_tls_engine_name()`],
 xref:nng_tls_engine_description.3tls.adoc[`nng_tls_engine_description()`], and
-xref:nng_tls_engine_fips_mode.3tls.adoc[`nng_tls_engine_fips_mode()`] functions.
+xref:nng_tls_engine_fips_mode.3tls.adoc[`nng_tls_engine_fips_mode()`], and
+xref:nng_tls_engine_check_pkcs11.3tls.adoc[`nng_tls_engine_check_pkcs11()`]
+functions.
 
 At this time, there is no further documentation on implementing a TLS
 engine oneself, but existing source code may be a guide.
@@ -42,6 +44,7 @@ The primary interfaces are located in the
 
 [.text-left]
 
+xref:nng_tls_engine_check_pkcs11.3tls.adoc[nng_tls_engine_check_pkcs11(3tls)],
 xref:nng_tls_engine_description.3tls.adoc[nng_tls_engine_description(3tls)],
 xref:nng_tls_engine_fips_mode.3tls.adoc[nng_tls_engine_fips_mode(3tls)],
 xref:nng_tls_engine_name.3tls.adoc[nng_tls_engine_name(3tls)],

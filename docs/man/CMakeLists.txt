@@ -345,6 +345,7 @@ if (NNG_ENABLE_DOC)
             nng_tls_config_own_cert
             nng_tls_config_psk
             nng_tls_config_server_name
+            nng_tls_engine_check_pkcs11
             nng_tls_engine_description
             nng_tls_engine_fips_mode
             nng_tls_engine_name

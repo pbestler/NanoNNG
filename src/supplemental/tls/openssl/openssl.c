@@ -1034,7 +1034,7 @@ static nng_tls_engine open_engine = {
 	.config_ops  = &open_config_ops,
 	.conn_ops    = &open_conn_ops,
 	.name        = "open",
-	.description = "OpenSSL 1.1.1",
+	.description = "OpenSSL",
 	.fips_mode   = false, // commercial users only
 };
 
