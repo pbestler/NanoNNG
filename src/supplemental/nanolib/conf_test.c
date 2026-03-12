@@ -145,6 +145,10 @@ test_conf_parse_ver2_tls_pkcs11(void)
 	NUTS_TRUE(conf != NULL);
 	conf_parse_ver2(conf);
 
+	NUTS_TRUE(NULL != conf->tls.url);
+	NUTS_TRUE(
+	    0 == strcmp(conf->tls.url, "tls+nmq-tcp://0.0.0.0:8883"));
+
 	NUTS_TRUE(NULL != conf->tls.keyfile);
 	NUTS_TRUE(NULL != conf->tls.key);
 	NUTS_TRUE(
