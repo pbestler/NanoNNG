@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "nng/supplemental/nanolib/conf.h"
 
 #include "nuts.h"
@@ -8,11 +10,17 @@
 	"nmq_old_test.conf"
 #define CONF_PATH \
 	"../../../../../nng/src/supplemental/nanolib/test_conf/nmq_test.conf"
+#define BRIDGE_ENV_CONF_PATH                                            \
+	"../../../../../nng/src/supplemental/nanolib/test_conf/"        \
+	"nmq_bridge_env_test.conf"
 #else
 #define OLD_CONF_PATH \
 	"../../../../src/supplemental/nanolib/test_conf/nmq_old_test.conf"
 #define CONF_PATH \
 	"../../../../src/supplemental/nanolib/test_conf/nmq_test.conf"
+#define BRIDGE_ENV_CONF_PATH                                           \
+	"../../../../src/supplemental/nanolib/test_conf/"              \
+	"nmq_bridge_env_test.conf"
 #endif
 
 
@@ -289,6 +297,51 @@ test_get_time_days(void)
 	// If not supported, should fail gracefully
 }
 
+static int
+test_set_env(const char *name, const char *value)
+{
+#ifdef NNG_PLATFORM_WINDOWS
+	return (_putenv_s(name, value));
+#else
+	return (setenv(name, value, 1));
+#endif
+}
+
+static int
+test_unset_env(const char *name)
+{
+#ifdef NNG_PLATFORM_WINDOWS
+	return (_putenv_s(name, ""));
+#else
+	return (unsetenv(name));
+#endif
+}
+
+void
+test_conf_parse_bridge_env(void)
+{
+	conf             *config;
+	conf_bridge_node *node;
+
+	NUTS_PASS(test_set_env("NANOMQ_TEST_CLIENT_SUFFIX", "client"));
+	NUTS_PASS(test_set_env("NANOMQ_TEST_USERNAME", "user"));
+	NUTS_PASS(test_set_env("NANOMQ_TEST_PASSWORD", "password"));
+
+	config = get_test_conf(BRIDGE_ENV_CONF_PATH);
+	NUTS_TRUE(config != NULL);
+	conf_parse_ver2(config, false);
+	NUTS_TRUE(config->bridge.count == 1);
+	node = config->bridge.nodes[0];
+	NUTS_TRUE(strcmp(node->clientid, "bridge-client-${VIN}") == 0);
+	NUTS_TRUE(strcmp(node->username, "user") == 0);
+	NUTS_TRUE(strcmp(node->password, "secret-password") == 0);
+
+	conf_fini(config);
+	NUTS_PASS(test_unset_env("NANOMQ_TEST_CLIENT_SUFFIX"));
+	NUTS_PASS(test_unset_env("NANOMQ_TEST_USERNAME"));
+	NUTS_PASS(test_unset_env("NANOMQ_TEST_PASSWORD"));
+}
+
 NUTS_TESTS = {
    {"get size", test_get_size},
    {"get time", test_get_time},
@@ -307,5 +360,6 @@ NUTS_TESTS = {
    {"conf fini null", test_conf_fini_null},
    {"get size bytes unit", test_get_size_bytes_unit},
    {"get time days", test_get_time_days},
+   {"conf parse bridge env", test_conf_parse_bridge_env},
    {NULL, NULL}
 };

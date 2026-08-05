@@ -977,6 +977,81 @@ check_and_replace_vin(char *origin, const char *replace)
 	return new;
 }
 
+// Resolve ${NAME} placeholders while leaving ${VIN} to its existing handler.
+static char *
+resolve_env_vars(char *value)
+{
+	char *pos;
+	char *result = value;
+
+	if (value == NULL) {
+		return (NULL);
+	}
+	pos = result;
+
+	while ((pos = strstr(pos, "${")) != NULL) {
+		char       *end;
+		char       *name;
+		const char *env;
+		size_t      name_len;
+
+		if (strncmp(pos, "${VIN}", sizeof("${VIN}") - 1) == 0) {
+			pos += 6;
+			continue;
+		}
+
+		end = strchr(pos + 2, '}');
+		if (end == NULL) {
+			break;
+		}
+
+		name_len = (size_t) (end - pos - 2);
+		if (name_len == 0) {
+			pos = end + 1;
+			continue;
+		}
+		if ((name = nng_alloc(name_len + 1)) == NULL) {
+			log_error("Unable to allocate bridge environment variable name");
+			return (result);
+		}
+		memcpy(name, pos + 2, name_len);
+		name[name_len] = '\0';
+
+		env = getenv(name);
+		if (env == NULL) {
+			log_warn("Bridge environment variable '%s' is not set; "
+			         "keeping its placeholder",
+			    name);
+			nng_free(name, name_len + 1);
+			pos = end + 1;
+			continue;
+		}
+
+		size_t before_len = (size_t) (pos - result);
+		size_t env_len    = strlen(env);
+		size_t after_len  = strlen(end + 1);
+		size_t result_len = before_len + env_len + after_len + 1;
+		char  *expanded;
+
+		if ((expanded = nng_alloc(result_len)) == NULL) {
+			log_error("Unable to expand bridge environment variable '%s'",
+			    name);
+			nng_free(name, name_len + 1);
+			return (result);
+		}
+		memcpy(expanded, result, before_len);
+		memcpy(expanded + before_len, env, env_len);
+		memcpy(expanded + before_len + env_len, end + 1, after_len + 1);
+
+		nng_free(name, name_len + 1);
+		nng_strfree(result);
+		result = expanded;
+		pos    = result + before_len + env_len;
+	}
+
+	return (result);
+}
+
 static void
 update_clientid_vin(conf_bridge_node *node, const char *vin)
 {
@@ -1079,6 +1154,12 @@ conf_bridge_connector_parse_ver2(conf_bridge_node *node, cJSON *jso_connector)
 	hocon_read_bool(node, enable, jso_connector);
 	hocon_read_str(node, username, jso_connector);
 	hocon_read_str(node, password, jso_connector);
+
+	// Resolve ${ENV_VAR_NAME} placeholders – e.g. username = "${MQTT_USER}"
+	node->clientid = resolve_env_vars(node->clientid);
+	node->username = resolve_env_vars(node->username);
+	node->password = resolve_env_vars(node->password);
+
 	update_bridge_node_vin(node, CONF_NODE_CLIENTID);
 
 	cJSON    *jso_tls         = hocon_get_obj("ssl", jso_connector);
