@@ -132,19 +132,26 @@ tls_conn_cb(void *arg)
 {
 	tls_conn *  conn = arg;
 	nng_stream *tcp;
+	nni_aio *   uaio;
 	int         rv;
 
 	if ((rv = nni_aio_result(&conn->conn_aio)) != 0) {
-		nni_aio_finish_error(conn->user_aio, rv);
+		// Free before finishing, so the reap is queued before
+		// anyone waiting on the user aio can go on to nng_fini.
+		uaio = conn->user_aio;
 		nng_stream_free(&conn->stream);
+		nni_aio_finish_error(uaio, rv);
 		return;
 	}
 
 	tcp = nni_aio_get_output(&conn->conn_aio, 0);
 
 	if ((rv = tls_start(conn, tcp)) != 0) {
-		nni_aio_finish_error(conn->user_aio, rv);
+		// Free before finishing, so the reap is queued before
+		// anyone waiting on the user aio can go on to nng_fini.
+		uaio = conn->user_aio;
 		nng_stream_free(&conn->stream);
+		nni_aio_finish_error(uaio, rv);
 		return;
 	}
 
