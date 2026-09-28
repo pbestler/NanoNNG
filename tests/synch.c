@@ -39,9 +39,11 @@ nng_thread *     thr;
 static void
 test_sync(void)
 {
-	Convey("Mutexes work", {
-		nng_mtx *mx;
+	// Declared out here: Reset runs after its Convey block has
+	// been left, so it must not use variables from that block.
+	nng_mtx *mx;
 
+	Convey("Mutexes work", {
 		So(nng_mtx_alloc(&mx) == 0);
 		Reset({ nng_mtx_free(mx); });
 

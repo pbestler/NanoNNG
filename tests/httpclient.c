@@ -250,11 +250,21 @@ raw_write_all(nng_stream *s, nng_aio *aio, const char *data, size_t len)
 }
 
 TestMain("HTTP Client", {
+	// Declared out here: Reset runs after its Convey block has
+	// been left, so it must not use variables from that block.
+	nng_aio *            aio;
+	nng_aio *            saio;
+	nng_http_client *    cli;
+	nng_http_conn *      http;
+	nng_url *            url;
+	nng_stream_listener *l;
+
 	Convey("Given a TCP connection to example.com", {
-		nng_aio *        aio;
-		nng_http_client *cli = NULL;
-		nng_http_conn *  http = NULL;
-		nng_url *        url;
+		nng_http_req *req;
+		nng_http_res *res;
+
+		cli  = NULL;
+		http = NULL;
 
 		So(nng_aio_alloc(&aio, NULL, NULL) == 0);
 
@@ -278,8 +288,8 @@ TestMain("HTTP Client", {
 		});
 
 		Convey("We can initiate a message", {
-			nng_http_req *req;
-			nng_http_res *res;
+			void * data;
+			size_t sz;
 
 			So(http != NULL);
 
@@ -301,9 +311,7 @@ TestMain("HTTP Client", {
 
 			Convey("The message contents are correct", {
 				uint8_t     digest[20];
-				void *      data;
 				const char *cstr;
-				size_t      sz;
 				nng_iov     iov;
 
 				cstr = nng_http_res_get_header(
@@ -334,9 +342,10 @@ TestMain("HTTP Client", {
 	});
 
 	Convey("Given a client", {
-		nng_aio *        aio;
-		nng_http_client *cli;
-		nng_url *        url;
+		nng_http_req *req;
+		nng_http_res *res;
+		nng_http_res *res1;
+		nng_http_res *res2;
 
 		So(nng_aio_alloc(&aio, NULL, NULL) == 0);
 
@@ -352,11 +361,9 @@ TestMain("HTTP Client", {
 		});
 
 		Convey("One off exchange works", {
-			nng_http_req *req;
-			nng_http_res *res;
-			void *        data;
-			size_t        len;
-			uint8_t       digest[20];
+			void *  data;
+			size_t  len;
+			uint8_t digest[20];
 
 			So(nng_http_req_alloc(&req, url) == 0);
 			So(nng_http_res_alloc(&res) == 0);
@@ -376,9 +383,6 @@ TestMain("HTTP Client", {
 		});
 
 		Convey("Connection reuse works", {
-			nng_http_req * req;
-			nng_http_res * res1;
-			nng_http_res * res2;
 			void *         data;
 			size_t         len;
 			uint8_t        digest[20];
@@ -460,14 +464,12 @@ TestMain("HTTP Client", {
 	});
 
 	Convey("Given a client (chunked)", {
-		nng_aio *            aio;
-		nng_aio *            saio;
-		nng_http_client *    cli;
-		nng_url *            url;
-		nng_stream_listener *l;
-		char                 portbuf[16];
-		char                 urlstr[64];
-		char                 tcpstr[64];
+		nng_http_req *req;
+		nng_http_res *res;
+		nng_stream *  s;
+		char          portbuf[16];
+		char          urlstr[64];
+		char          tcpstr[64];
 
 		trantest_next_address(portbuf, "");
 		snprintf(urlstr, sizeof(urlstr), "http://127.0.0.1:%s/Chunked",
@@ -495,14 +497,12 @@ TestMain("HTTP Client", {
 		});
 
 		Convey("One off exchange works", {
-			nng_http_req *req;
-			nng_http_res *res;
-			nng_stream *  s = NULL;
-			const char *  cstr;
-			void *        data;
-			size_t        len;
-			int           i;
+			const char *cstr;
+			void *      data;
+			size_t      len;
+			int         i;
 
+			s = NULL;
 			So(nng_http_req_alloc(&req, url) == 0);
 			So(nng_http_res_alloc(&res) == 0);
 			Reset({
