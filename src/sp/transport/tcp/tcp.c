@@ -231,6 +231,12 @@ tcptran_pipe_nego_cb(void *arg)
 	if ((rv = nni_aio_result(aio)) != 0) {
 		goto error;
 	}
+	// The endpoint may have closed negoaio after this completion was
+	// queued; resubmitting on a closed aio never calls us back.
+	if (ep->closed || ep->fini) {
+		rv = NNG_ECLOSED;
+		goto error;
+	}
 
 	// We start transmitting before we receive.
 	if (p->gottxhead < p->wanttxhead) {
@@ -294,9 +300,10 @@ error:
 		nni_aio_finish_error(uaio, rv);
 	}
 	nni_list_remove(&ep->negopipes, p);
-	nni_mtx_unlock(&ep->mtx);
-
+	// Reap under the lock, so tcptran_ep_fini cannot see the pipe gone
+	// from negopipes before its reap is queued.
 	tcptran_pipe_reap(p);
+	nni_mtx_unlock(&ep->mtx);
 }
 
 static void
@@ -657,10 +664,18 @@ tcptran_pipe_start(tcptran_pipe *p, nng_stream *conn, tcptran_ep *ep)
 static void
 tcptran_ep_fini(void *arg)
 {
-	tcptran_ep *ep = arg;
+	tcptran_ep   *ep = arg;
+	tcptran_pipe *p;
 
 	nni_mtx_lock(&ep->mtx);
 	ep->fini = true;
+	// The socket does not track negotiating pipes, so wait for their
+	// callbacks here, or their cleanup can race with nng_fini.
+	while ((p = nni_list_first(&ep->negopipes)) != NULL) {
+		nni_mtx_unlock(&ep->mtx);
+		nni_aio_stop(p->negoaio);
+		nni_mtx_lock(&ep->mtx);
+	}
 	if (ep->refcnt != 0) {
 		nni_mtx_unlock(&ep->mtx);
 		return;
@@ -698,6 +713,8 @@ tcptran_ep_close(void *arg)
 	}
 	NNI_LIST_FOREACH (&ep->waitpipes, p) {
 		tcptran_pipe_close(p);
+		// Not yet handed to the socket, so nobody else will reap it.
+		tcptran_pipe_reap(p);
 	}
 	NNI_LIST_FOREACH (&ep->busypipes, p) {
 		tcptran_pipe_close(p);
