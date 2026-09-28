@@ -115,10 +115,11 @@ nuts_next_port(void)
 		name = ".nuts_ports";
 	}
 	if (((str = getenv("NUTS_PORT_RANGE")) == NULL) ||
-	    ((sscanf(str, "%hu:%hu", &base, &end)) != 1) ||
+	    ((sscanf(str, "%hu:%hu", &base, &end)) != 2) ||
 	    ((int) end - (int) base) < 1) {
-		base = 38000;
-		end  = 40000;
+		// Below 32768, where the Linux ephemeral range starts.
+		base = 30000;
+		end  = 32000;
 	}
 
 	if (((f = fopen(name, "r+")) == NULL) &&
@@ -154,7 +155,7 @@ nuts_next_port(void)
 #endif
 	}
 	port++;
-	if ((port < base) || (port >= (base + end))) {
+	if ((port < base) || (port >= end)) {
 		port = base;
 	}
 
