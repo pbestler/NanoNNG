@@ -231,6 +231,12 @@ tlstran_pipe_nego_cb(void *arg)
 	if ((rv = nni_aio_result(aio)) != 0) {
 		goto error;
 	}
+	// The endpoint may have closed negoaio after this completion was
+	// queued; resubmitting on a closed aio never calls us back.
+	if (ep->closed) {
+		rv = NNG_ECLOSED;
+		goto error;
+	}
 
 	// We start transmitting before we receive.
 	if (p->gottxhead < p->wanttxhead) {
@@ -663,6 +669,8 @@ tlstran_ep_close(void *arg)
 	}
 	NNI_LIST_FOREACH (&ep->waitpipes, p) {
 		tlstran_pipe_close(p);
+		// Not yet handed to the socket, so nobody else will reap it.
+		tlstran_pipe_reap(p);
 	}
 	NNI_LIST_FOREACH (&ep->busypipes, p) {
 		tlstran_pipe_close(p);
