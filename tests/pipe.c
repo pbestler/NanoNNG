@@ -80,6 +80,8 @@ expect_at_least(struct testcase *t, int *vp, int v)
 	return (ok);
 }
 
+/** Pipe event callback that checks the pipe's owners, counts the event and
+ * remembers the pipe being added. */
 void
 notify(nng_pipe p, nng_pipe_ev act, void *arg)
 {
@@ -100,11 +102,15 @@ notify(nng_pipe p, nng_pipe_ev act, void *arg)
 	switch (act) {
 	case NNG_PIPE_EV_ADD_PRE:
 		t->add_pre++;
+		t->p = p;
 		break;
 	case NNG_PIPE_EV_ADD_POST:
 		t->add_post++;
+		t->p = p;
 		break;
 	case NNG_PIPE_EV_REM_POST:
+		// Keep t->p on the pipe being added: the removal of the old
+		// pipe can be reported after its replacement was added.
 		t->rem++;
 		break;
 	default:
@@ -113,7 +119,6 @@ notify(nng_pipe p, nng_pipe_ev act, void *arg)
 		nng_mtx_unlock(t->lk);
 		return;
 	}
-	t->p = p;
 	nng_cv_wake(t->cv);
 	nng_mtx_unlock(t->lk);
 }
