@@ -46,6 +46,7 @@ struct push0_pipe {
 	nni_pipe     *pipe;
 	push0_sock   *push;
 	nni_list_node node;
+	bool          closed; // set by push0_pipe_close under push->m
 
 	nni_aio aio_recv;
 	nni_aio aio_send;
@@ -123,6 +124,8 @@ push0_pipe_init(void *arg, nni_pipe *pipe, void *s)
 	return (0);
 }
 
+/** Checks the peer protocol, schedules the receive that detects a closed
+ * transport, and offers the pipe for sending. */
 static int
 push0_pipe_start(void *arg)
 {
@@ -140,6 +143,8 @@ push0_pipe_start(void *arg)
 	return (0);
 }
 
+/** Marks the pipe closed under the socket lock and takes it off the ready
+ * list, clearing writability if nothing can send any more. */
 static int
 push0_pipe_close(void *arg)
 {
@@ -150,6 +155,7 @@ push0_pipe_close(void *arg)
 	nni_aio_close(&p->aio_send);
 
 	nni_mtx_lock(&s->m);
+	p->closed = true;
 	if (nni_list_node_active(&p->node)) {
 		nni_list_node_remove(&p->node);
 
@@ -162,6 +168,8 @@ push0_pipe_close(void *arg)
 	return 0;
 }
 
+/** Receive completion on a push pipe: closes the pipe on error, otherwise
+ * discards the data and rearms the receive. */
 static void
 push0_recv_cb(void *arg)
 {
@@ -178,6 +186,8 @@ push0_recv_cb(void *arg)
 	nni_pipe_recv(p->pipe, &p->aio_recv);
 }
 
+/** Sends the next queued or waiting message on this pipe, or puts the pipe
+ * on the ready list; skipped once the pipe was closed. */
 static void
 push0_pipe_ready(push0_pipe *p)
 {
@@ -188,6 +198,13 @@ push0_pipe_ready(push0_pipe *p)
 	bool        blocked;
 
 	nni_mtx_lock(&s->m);
+
+	// The peer may close before push0_pipe_start links us: the close
+	// then found nothing to remove, so do not link a closed pipe.
+	if (p->closed) {
+		nni_mtx_unlock(&s->m);
+		return;
+	}
 
 	blocked = nni_lmq_full(&s->wq) && nni_list_empty(&s->pl);
 
