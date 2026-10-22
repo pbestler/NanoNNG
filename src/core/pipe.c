@@ -29,6 +29,8 @@ static nni_reap_list pipe_reap_list = {
 	.rl_func   = pipe_destroy,
 };
 
+/** Reaper entry: announces the removal, waits for all holders, stops and
+ * finalizes the protocol and transport state, and frees the pipe. */
 static void
 pipe_destroy(void *arg)
 {
@@ -36,6 +38,15 @@ pipe_destroy(void *arg)
 	if (p == NULL || nni_atomic_get_bool(&p->cache)) {
 		return;
 	}
+
+	// The endpoint that created us may still be in its add path and
+	// deliver ADD_POST. Let it finish first, so the events of a pipe
+	// arrive in order and ADD_POST still finds the pipe by its id.
+	nni_mtx_lock(&pipes_lk);
+	while (p->p_ref != 0) {
+		nni_cv_wait(&p->p_cv);
+	}
+	nni_mtx_unlock(&pipes_lk);
 
 	nni_pipe_run_cb(p, NNG_PIPE_EV_REM_POST);
 
