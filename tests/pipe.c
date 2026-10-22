@@ -38,6 +38,7 @@ struct testcase {
 	nng_cv *     cv;
 };
 
+/** Waits up to five seconds for *vp to reach exactly v. */
 static bool
 expect(struct testcase *t, int *vp, int v)
 {
@@ -53,6 +54,27 @@ expect(struct testcase *t, int *vp, int v)
 	ok = (*vp == v) ? true : false;
 	if (!ok) {
 		printf("Expected %d but got %d\n", v, *vp);
+	}
+	nng_mtx_unlock(t->lk);
+	return (ok);
+}
+
+/** Waits up to five seconds for *vp to reach v or more. */
+static bool
+expect_at_least(struct testcase *t, int *vp, int v)
+{
+	bool     ok;
+	nng_time when = nng_clock() + 5000; // five seconds
+
+	nng_mtx_lock(t->lk);
+	while (*vp < v) {
+		if (nng_cv_until(t->cv, when) == NNG_ETIMEDOUT) {
+			break;
+		}
+	}
+	ok = (*vp >= v);
+	if (!ok) {
+		printf("Expected at least %d but got %d\n", v, *vp);
 	}
 	nng_mtx_unlock(t->lk);
 	return (ok);
@@ -242,7 +264,12 @@ TestMain("Pipe notify works", {
 			So(expect(&pull, &pull.rem, 1));
 			So(expect(&pull, &pull.err, 0));
 			So(expect(&push, &push.add_pre, 2));
-			So(expect(&push, &push.add_post, 2));
+			// The listener rejects the first connection in ADD_PRE.
+			// Its peer can therefore observe either one or two
+			// ADD_POST events, depending on whether it starts that
+			// first pipe before receiving the close. The replacement
+			// connection must always be established.
+			So(expect_at_least(&push, &push.add_post, 1));
 			So(expect(&push, &push.rem, 1) == 1);
 			So(expect(&push, &push.err, 0));
 		});
