@@ -393,6 +393,15 @@ test_tls_psk(void)
 		key[i] = rand() % 0xff;
 	}
 
+	// Engines built without PSK support refuse the configuration.
+	NUTS_PASS(nng_tls_config_alloc(&c0, NNG_TLS_MODE_SERVER));
+	if (nng_tls_config_psk(c0, "identity", key, sizeof key) ==
+	    NNG_ENOTSUP) {
+		nng_tls_config_free(c0);
+		return;
+	}
+	nng_tls_config_free(c0);
+
 	NUTS_ADDR(addr, "tls+tcp");
 
 	c0 = tls_config_psk(NNG_TLS_MODE_SERVER, "identity", key, sizeof key);

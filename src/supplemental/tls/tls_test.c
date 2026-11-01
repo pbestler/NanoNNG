@@ -9,6 +9,20 @@
 
 #include <nuts.h>
 
+/** Reports whether the TLS engine was built with PSK support. */
+static bool
+tls_psk_supported(void)
+{
+	nng_tls_config *cfg;
+	uint8_t         key[32] = { 0 };
+	int             rv;
+
+	NUTS_PASS(nng_tls_config_alloc(&cfg, NNG_TLS_MODE_CLIENT));
+	rv = nng_tls_config_psk(cfg, "identity", key, sizeof(key));
+	nng_tls_config_free(cfg);
+	return (rv != NNG_ENOTSUP);
+}
+
 void
 test_tls_config_version(void)
 {
@@ -528,6 +542,10 @@ test_tls_psk(void)
 	void                *t2;
 	int                  port;
 
+	if (!tls_psk_supported()) {
+		return;
+	}
+
 	NUTS_ENABLE_LOG(NNG_LOG_DEBUG);
 	// allocate messages
 	NUTS_ASSERT((buf1 = nng_alloc(size)) != NULL);
@@ -614,6 +632,10 @@ test_tls_psk_server_identities(void)
 	int                  port;
 	char                *identity = "test_identity";
 	uint8_t              key[32];
+
+	if (!tls_psk_supported()) {
+		return;
+	}
 
 	NUTS_ENABLE_LOG(NNG_LOG_INFO);
 	// allocate messages
@@ -705,6 +727,10 @@ test_tls_psk_bad_identity(void)
 	int                  port;
 	uint8_t              key[32];
 
+	if (!tls_psk_supported()) {
+		return;
+	}
+
 	NUTS_ENABLE_LOG(NNG_LOG_INFO);
 	// allocate messages
 	NUTS_ASSERT((buf1 = nng_alloc(size)) != NULL);
@@ -779,6 +805,10 @@ test_tls_psk_key_too_big(void)
 	nng_tls_config *c1;
 	uint8_t         key[5000];
 
+	if (!tls_psk_supported()) {
+		return;
+	}
+
 	NUTS_ENABLE_LOG(NNG_LOG_INFO);
 
 	// Allocate the listener first.  We use a wild-card port.
@@ -795,6 +825,10 @@ test_tls_psk_config_busy(void)
 	uint8_t              key[32];
 	nng_stream_listener *l;
 	nng_aio             *aio;
+
+	if (!tls_psk_supported()) {
+		return;
+	}
 
 	nng_aio_alloc(&aio, NULL, NULL);
 
