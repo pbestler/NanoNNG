@@ -285,13 +285,23 @@ open_conn_init(nng_tls_engine_conn *ec, void *tls, nng_tls_engine_config *cfg)
 	return (0);
 }
 
+/** Sends close_notify, as the mbedTLS engine does, before the TCP connection
+ * is closed. A peer that starts its next receive only after seeing the TCP
+ * close then still finds the close_notify record and fails that receive. */
 static void
 open_conn_close(nng_tls_engine_conn *ec)
 {
+	int ensz;
+
 	trace("start");
 	if (ec->wnext)
 		nng_free(ec->wnext, 0);
 	SSL_shutdown(ec->ssl);
+	while ((ensz = BIO_read(ec->wbio, ec->rbuf, OPEN_BUF_SZ)) > 0) {
+		if (open_net_write(ec->tls, ec->rbuf, ensz) < 0) {
+			break;
+		}
+	}
 	trace("end");
 }
 
