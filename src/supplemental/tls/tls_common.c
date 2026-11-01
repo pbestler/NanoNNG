@@ -74,6 +74,7 @@ typedef struct {
 	size_t                  tcp_recv_off;
 	bool                    tcp_recv_pend;
 	bool                    tcp_send_active;
+	int                     tcp_err; // first TCP error, for later I/O
 	size_t                  tcp_send_len;
 	size_t                  tcp_send_head;
 	size_t                  tcp_send_tail;
@@ -990,6 +991,11 @@ tls_tcp_error(tls_conn *conn, int rv)
 {
 	// An error here is fatal.  Shut it all down.
 	nni_aio *aio;
+	// The TCP aios are closed now and would not start again, so the
+	// engine gets this error instead of waiting on them.
+	if (conn->tcp_err == 0) {
+		conn->tcp_err = rv;
+	}
 	nng_stream_close(conn->tcp);
 	nni_aio_close(&conn->tcp_send);
 	nni_aio_close(&conn->tcp_recv);
@@ -1250,6 +1256,10 @@ nng_tls_engine_send(void *arg, const uint8_t *buf, size_t *szp)
 	size_t    space;
 	size_t    cnt;
 
+	if (conn->tcp_err != 0) {
+		return (conn->tcp_err);
+	}
+
 	space = NNG_TLS_MAX_SEND_SIZE - conn->tcp_send_len;
 
 	if (space == 0) {
@@ -1303,6 +1313,9 @@ nng_tls_engine_recv(void *arg, uint8_t *buf, size_t *szp)
 		return (NNG_ECLOSED);
 	}
 	if (conn->tcp_recv_len == 0) {
+		if (conn->tcp_err != 0) {
+			return (conn->tcp_err);
+		}
 		tls_tcp_recv_start(conn);
 		return (NNG_EAGAIN);
 	}

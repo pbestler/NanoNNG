@@ -455,6 +455,60 @@ test_tls_own_cert_trailing_garbage(void)
 	nng_tls_config_free(c1);
 }
 
+/** Fails I/O that starts after the peer closed TCP without close_notify:
+ * the TLS stream must not wait for a TCP receive that no longer runs. */
+void
+test_tls_io_after_peer_close(void)
+{
+	nng_stream_listener *l;
+	nng_stream_dialer   *d;
+	nng_tls_config      *c;
+	nng_aio             *aio1, *aio2;
+	nng_stream          *s1;
+	nng_stream          *s2;
+	char                 addr[32];
+	uint8_t              buf[8] = { 0 };
+	int                  port;
+
+	NUTS_PASS(nng_aio_alloc(&aio1, NULL, NULL));
+	NUTS_PASS(nng_aio_alloc(&aio2, NULL, NULL));
+	nng_aio_set_timeout(aio1, 5000);
+	nng_aio_set_timeout(aio2, 5000);
+
+	// A plain TCP peer, so its close carries no close_notify.
+	NUTS_PASS(nng_stream_listener_alloc(&l, "tcp://127.0.0.1:0"));
+	NUTS_PASS(nng_stream_listener_listen(l));
+	NUTS_PASS(
+	    nng_stream_listener_get_int(l, NNG_OPT_TCP_BOUND_PORT, &port));
+
+	snprintf(addr, sizeof(addr), "tls+tcp://127.0.0.1:%d", port);
+	NUTS_PASS(nng_stream_dialer_alloc(&d, addr));
+	NUTS_PASS(nng_tls_config_alloc(&c, NNG_TLS_MODE_CLIENT));
+	NUTS_PASS(nng_stream_dialer_set_ptr(d, NNG_OPT_TLS_CONFIG, c));
+
+	nng_stream_listener_accept(l, aio1);
+	nng_stream_dialer_dial(d, aio2);
+	nng_aio_wait(aio1);
+	nng_aio_wait(aio2);
+	NUTS_PASS(nng_aio_result(aio1));
+	NUTS_PASS(nng_aio_result(aio2));
+	s1 = nng_aio_get_output(aio1, 0);
+	s2 = nng_aio_get_output(aio2, 0);
+	nng_stream_free(s1);
+
+	// The first receive starts the handshake and sees the close.
+	NUTS_TRUE(nuts_stream_wait(nuts_stream_recv_start(s2, buf, 8)) != 0);
+	NUTS_TRUE(nuts_stream_wait(nuts_stream_recv_start(s2, buf, 8)) != 0);
+	NUTS_TRUE(nuts_stream_wait(nuts_stream_send_start(s2, buf, 8)) != 0);
+
+	nng_stream_free(s2);
+	nng_stream_dialer_free(d);
+	nng_stream_listener_free(l);
+	nng_tls_config_free(c);
+	nng_aio_free(aio1);
+	nng_aio_free(aio2);
+}
+
 void
 test_tls_psk(void)
 {
@@ -772,6 +826,7 @@ TEST_LIST = {
 	{ "tls optional with peer cert", test_tls_optional_with_peer_cert },
 	{ "tls garbled cert", test_tls_garbled_cert },
 	{ "tls own cert trailing garbage", test_tls_own_cert_trailing_garbage },
+	{ "tls io after peer close", test_tls_io_after_peer_close },
 	{ "tls psk", test_tls_psk },
 	{ "tls psk server identities", test_tls_psk_server_identities },
 	{ "tls psk bad identity", test_tls_psk_bad_identity },

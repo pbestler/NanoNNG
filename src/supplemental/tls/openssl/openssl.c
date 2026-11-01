@@ -354,6 +354,10 @@ open_conn_handshake(nng_tls_engine_conn *ec)
 			}
 			SSL_do_handshake(ec->ssl);
 		}
+		if (ensz != 0 - SSL_ERROR_WANT_READ &&
+		    ensz != 0 - SSL_ERROR_WANT_WRITE) {
+			return (NNG_ECLOSED);
+		}
 	} else if (rv != SSL_ERROR_NONE) {
 		open_log_ssl_error("NNG-TLS-CONN-HANDSHAKE SSL_do_handshake", rv);
 		return NNG_ECRYPTO;
@@ -393,8 +397,9 @@ static int
 open_conn_recv(nng_tls_engine_conn *ec, uint8_t *buf, size_t *szp)
 {
 	trace("start");
-	int rv;
-	int ensz = OPEN_BUF_SZ;
+	int  rv;
+	int  ensz = OPEN_BUF_SZ;
+	bool eof  = false;
 
 	// SSL_read can only advance the handshake into the memory BIOs; the
 	// handshake routine is what moves those records over TCP.
@@ -411,7 +416,9 @@ open_conn_recv(nng_tls_engine_conn *ec, uint8_t *buf, size_t *szp)
 		    rv == 0 - SSL_ERROR_WANT_WRITE) {
 			break;
 		} else if (rv < 0) {
-			return (NNG_ECLOSED);
+			// Deliver what the BIO already holds first.
+			eof = true;
+			break;
 		}
 
 		int written = 0;
@@ -440,6 +447,9 @@ open_conn_recv(nng_tls_engine_conn *ec, uint8_t *buf, size_t *szp)
 		// TODO return codes according openssl documents
 		if (ssl_rv == SSL_ERROR_WANT_READ ||
 		    ssl_rv == SSL_ERROR_WANT_WRITE) {
+			if (eof) {
+				return (NNG_ECLOSED);
+			}
 			*szp = 0;
 		} else if (ssl_rv == SSL_ERROR_ZERO_RETURN) {
 			log_debug("NNG-TLS-CONN-RECV"
