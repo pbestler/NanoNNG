@@ -145,9 +145,9 @@ struct nng_tls_engine_conn {
 	// 2 * OPEN_BUF_SZ should be enough to put encrypted data
 	char     rbuf[2 * OPEN_BUF_SZ];
 	char     wbuf[2 * OPEN_BUF_SZ];
-	char    *wnext;
+	char    *wnext;   // encrypted records TCP has not accepted yet
 	int      wnsz;
-	int      wntcpsz;
+	int      wntcpsz; // plaintext bytes of the pending send they carry
 	int      running;
 	int      ok;
 };
@@ -216,6 +216,8 @@ open_net_read(void *ctx, char *buf, int len) {
 	}
 }
 
+/** Passes encrypted bytes to the transport and maps NNG results to the
+ * negated SSL_ERROR_* codes understood by the engine's I/O loop. */
 static int
 open_net_write(void *ctx, const char *buf, int len) {
 	trace("start %d", len);
@@ -361,6 +363,7 @@ open_conn_handshake(nng_tls_engine_conn *ec)
 	return 0;
 }
 
+/** Receives plaintext after progressing the handshake and draining TCP input. */
 static int
 open_conn_recv(nng_tls_engine_conn *ec, uint8_t *buf, size_t *szp)
 {
@@ -368,33 +371,43 @@ open_conn_recv(nng_tls_engine_conn *ec, uint8_t *buf, size_t *szp)
 	int rv;
 	int ensz = OPEN_BUF_SZ;
 
-	rv = open_net_read(ec->tls, ec->wbuf, ensz);
-	if (rv == 0 - SSL_ERROR_WANT_READ || rv == 0 - SSL_ERROR_WANT_WRITE) {
-		rv = NNG_EAGAIN;
-		goto readopenssl;
+	// SSL_read can only advance the handshake into the memory BIOs; the
+	// handshake routine is what moves those records over TCP.
+	if (!ec->ok && (rv = open_conn_handshake(ec)) != 0) {
+		return (rv);
 	}
-	else if (rv < 0)
-		return (NNG_ECLOSED);
 
-	int written = 0;
-	while ((ensz = BIO_write(ec->rbio, ec->wbuf + written, rv - written)) > 0) {
-		written += ensz;
-		if (written == rv)
+	// Move everything TCP has buffered into the BIO. Bytes left in the TCP
+	// buffer keep tls_tcp_recv_start from receiving more, so a record
+	// split across that boundary would never complete.
+	for (;;) {
+		rv = open_net_read(ec->tls, ec->wbuf, OPEN_BUF_SZ);
+		if (rv == 0 - SSL_ERROR_WANT_READ ||
+		    rv == 0 - SSL_ERROR_WANT_WRITE) {
 			break;
-	}
-	if (ensz < 0) {
-		log_debug("NNG-TLS-CONN-RECV" "bio write result %d", ensz);
-		if (!BIO_should_retry(ec->rbio)) {
-			log_error("NNG-TLS-CONN-RECV"
-				"openssl BIO write failed rv%d", ensz);
-			open_log_ssl_error("NNG-TLS-CONN-RECV BIO_write", 0);
-			return (NNG_ECRYPTO);
+		} else if (rv < 0) {
+			return (NNG_ECLOSED);
 		}
-	}
-	log_debug("NNG-TLS-CONN-RECV"
-			"recv %d from tcp and written %d to BIO", rv, written);
 
-readopenssl:
+		int written = 0;
+		while ((ensz = BIO_write(ec->rbio, ec->wbuf + written, rv - written)) > 0) {
+			written += ensz;
+			if (written == rv)
+				break;
+		}
+		if (ensz < 0) {
+			log_debug("NNG-TLS-CONN-RECV" "bio write result %d", ensz);
+			if (!BIO_should_retry(ec->rbio)) {
+				log_error("NNG-TLS-CONN-RECV"
+					"openssl BIO write failed rv%d", ensz);
+				open_log_ssl_error("NNG-TLS-CONN-RECV BIO_write", 0);
+				return (NNG_ECRYPTO);
+			}
+		}
+		log_debug("NNG-TLS-CONN-RECV"
+				"recv %d from tcp and written %d to BIO", rv, written);
+	}
+
 	ERR_clear_error();
 	rv = SSL_read(ec->ssl, buf, (int) *szp);
 	if (rv <= 0) {
@@ -445,6 +458,12 @@ readopenssl:
 	return (0);
 }
 
+/** Sends plaintext, retaining encrypted records until TCP can accept them.
+ * Retained records belong to the buffer being sent: the call returns
+ * NNG_EAGAIN, and the caller presents the same buffer again, which resumes
+ * behind the plaintext those records already carry. The TLS stream keeps
+ * that send at the head of its queue until the engine completes it;
+ * cancelling it fails the connection instead of swapping the buffer. */
 static int
 open_conn_send(nng_tls_engine_conn *ec, const uint8_t *buf, size_t *szp)
 {
@@ -454,6 +473,10 @@ open_conn_send(nng_tls_engine_conn *ec, const uint8_t *buf, size_t *szp)
 	int written2ssl = 0;
 	int written2tcp = 0;
 	trace("start");
+
+	if (!ec->ok && (rv = open_conn_handshake(ec)) != 0) {
+		return (rv);
+	}
 
 	if (ec->wnext) {
 		log_debug("NNG-TLS-CONN-SEND"
@@ -473,9 +496,11 @@ open_conn_send(nng_tls_engine_conn *ec, const uint8_t *buf, size_t *szp)
 				return NNG_EAGAIN;
 			}
 			nng_free(wnext, 0);
+			// The records carried this many bytes of buf, so
+			// continue behind them with the rest of the buffer.
 			written2tcp = ec->wntcpsz;
+			ec->wntcpsz = 0;
 			log_debug("writing done%d written2tcp%d", ec->wnsz, written2tcp);
-			goto end;
 		} else if (rv == 0 - SSL_ERROR_WANT_READ || rv == 0 - SSL_ERROR_WANT_WRITE) {
 			trace("end3");
 			return (NNG_EAGAIN);
@@ -525,37 +550,39 @@ open_conn_send(nng_tls_engine_conn *ec, const uint8_t *buf, size_t *szp)
 			}
 		}
 
+		if (read2buf == 0) {
+			// SSL_write neither took data nor produced records.
+			break;
+		}
+
 		rv = open_net_write(ec->tls, ec->rbuf, read2buf);
-		if (rv > 0) {
-			if (rv != read2buf) {
-				int dm = read2buf - rv;
-				ec->wnext = nng_alloc(sizeof(char) * dm);
-				memcpy(ec->wnext, ec->rbuf + rv, dm);
-				ec->wnsz = dm;
-				log_debug("NNG-TLS-CONN-SEND"
-					"tcp%d ssl%d written%d remain%dbytes to put to kernel",
-					written2tcp, read2buf, rv, dm);
-				// written2tcp += written2ssl; // This may make wnext send after a long time
-				// So updated way is as following.
-				// Part of block of data sent failed. The return value size will not
-				// contains the length of this block. So Upper layer will send again.
-				// So the `wnext` will be sent next immediately.
-				ec->wntcpsz = written2ssl;
-				goto end;
-			}
-			written2tcp += written2ssl;
-			// A special case before handshake finished
-			if (written2tcp == 0) {
-				goto end;
-			}
-		} else if (rv == 0 - SSL_ERROR_WANT_READ || rv == 0 - SSL_ERROR_WANT_WRITE) {
-			trace("end2 read2buf%d written2tcp%d", read2buf, written2tcp);
-			if (written2tcp == 0)
-				return NNG_EAGAIN;
-			*szp = (size_t) written2tcp;
-			return 0;
-		} else
+		if (rv == 0 - SSL_ERROR_WANT_READ || rv == 0 - SSL_ERROR_WANT_WRITE) {
+			// The TCP send buffer is full. SSL has consumed the
+			// plaintext already, so the records must not be dropped.
+			rv = 0;
+		} else if (rv < 0) {
 			return (NNG_ECLOSED);
+		}
+		if (rv != read2buf) {
+			int dm = read2buf - rv;
+			ec->wnext = nng_alloc(sizeof(char) * dm);
+			memcpy(ec->wnext, ec->rbuf + rv, dm);
+			ec->wnsz = dm;
+			log_debug("NNG-TLS-CONN-SEND"
+				"tcp%d ssl%d written%d remain%dbytes to put to kernel",
+				written2tcp, read2buf, rv, dm);
+			// SSL consumed the plaintext up to here. A partial count
+			// would complete this send and credit the retained records
+			// to whatever buffer comes next, so hold the send until
+			// they are out and resume behind them.
+			ec->wntcpsz = written2tcp + written2ssl;
+			return (NNG_EAGAIN);
+		}
+		written2tcp += written2ssl;
+		// A special case before handshake finished
+		if (written2tcp == 0) {
+			goto end;
+		}
 	}
 end:
 	trace("end written2tcp%d", written2tcp);
