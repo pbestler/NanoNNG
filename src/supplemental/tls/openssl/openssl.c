@@ -247,6 +247,7 @@ open_net_write(void *ctx, const char *buf, int len) {
 	}
 }
 
+/** Creates a TLS connection and configures the expected server identity. */
 static int
 open_conn_init(nng_tls_engine_conn *ec, void *tls, nng_tls_engine_config *cfg)
 {
@@ -277,8 +278,21 @@ open_conn_init(nng_tls_engine_conn *ec, void *tls, nng_tls_engine_config *cfg)
 
 	ec->wnext = NULL;
 
-	if (cfg->server_name != NULL) {
-		SSL_set_tlsext_host_name(ec->ssl, cfg->server_name);
+	if (cfg->mode == NNG_TLS_MODE_CLIENT && cfg->server_name != NULL &&
+	    cfg->server_name[0] != '\0') {
+		const char        *name = cfg->server_name;
+		X509_VERIFY_PARAM *param = SSL_get0_param(ec->ssl);
+
+		// IP literals must match IP SANs and must not be sent as SNI.
+		// A leading dot would let OpenSSL match any subdomain.
+		if (X509_VERIFY_PARAM_set1_ip_asc(param, name) != 1) {
+			ERR_clear_error();
+			if (name[0] == '.' || strchr(name, ':') != NULL ||
+			    X509_VERIFY_PARAM_set1_host(param, name, 0) != 1 ||
+			    SSL_set_tlsext_host_name(ec->ssl, name) != 1) {
+				return (NNG_EINVAL);
+			}
+		}
 	}
 	trace("end");
 
@@ -668,6 +682,8 @@ open_conn_peer_cn(nng_tls_engine_conn *ec)
 	return (rv);
 }
 
+/** Returns the peer certificate subject in RFC 2253 form, allocated with
+ * malloc for the caller, or NULL without a peer certificate. */
 static char *
 open_conn_peer_subject(nng_tls_engine_conn *ec)
 {
@@ -749,6 +765,8 @@ open_config_init(nng_tls_engine_config *cfg, enum nng_tls_mode mode)
 	return (0);
 }
 
+/** Stores a copy of the expected server name, used for SNI and identity
+ * checks when connections are created. */
 static int
 open_config_server(nng_tls_engine_config *cfg, const char *name)
 {
